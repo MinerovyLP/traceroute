@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "raw-socket": "^1.8.1"
+  }
+}

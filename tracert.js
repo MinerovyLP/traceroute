@@ -13,48 +13,6 @@ const DESTINATION = args[0];
 const MAX_HOPS = parseInt(args[1]) || 30;
 const TIMEOUT = parseInt(args[2]) || 1000;
 
-function checksum(buffer) {
-    let sum = 0;
-    for (let i = 0; i < buffer.length; i += 2) sum += buffer.readUInt16BE(i);
-    sum = (sum >> 16) + (sum & 0xFFFF);
-    sum += (sum >> 16);
-    return (~sum & 0xFFFF);
-}
-
-function getLoc(ip) {
-    return new Promise((resolve) => {
-        const parts = ip.split('.').map(Number);
-        
-        const isLocal = 
-            (parts[0] === 10) ||                                 // Private Class A
-            (parts[0] === 192 && parts[1] === 168) ||            // Private Class C
-            (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || // Private Class B
-            (parts[0] === 127) ||                                // Loopback (127.0.0.0/8)
-            (parts[0] === 169 && parts[1] === 254) ||            // Link-local (169.254.0.0/16)
-            (parts[0] === 100 && (parts[1] >= 64 && parts[1] <= 127)); // CGNAT (100.64.0.0/10)
-        
-        if (isLocal) {
-            return resolve("Local Network");
-        }
-        
-        http.get(`http://ip-api.com/json/${ip}?fields=status,country,regionName,city`, (res) => {
-            let data = '';
-            res.on('data', d => data += d);
-            res.on('end', () => {
-                try {
-                    const j = JSON.parse(data);
-                    if (j.status === 'success') {
-                        const parts = [j.country, j.regionName, j.city].filter(p => p && p.trim() !== "");
-                        resolve(parts.join(', '));
-                    } else {
-                        resolve("");
-                    }
-                } catch (e) { resolve(""); }
-            });
-        }).on('error', () => resolve(""));
-    });
-}
-
 async function trace() {
     let targetIp;
     try {
@@ -90,7 +48,7 @@ async function trace() {
         if (res.timeout) {
             console.log(`${hop} * * *`);
         } else {
-            const location = await getLoc(res.ip);
+            const location = await getLocation(res.ip);
             const ipPart = res.ip.padEnd(15);
             const timePart = `${res.time}ms`.padEnd(8);
             console.log(`${hop} ${ipPart}  ${timePart}  ${location}`);
@@ -134,6 +92,34 @@ function sendIcmpProbe(targetIp, ttl) {
         socket.send(buffer, 0, buffer.length, targetIp, (err) => {
             if (err) finalize({ ttl, timeout: true });
         });
+    });
+}
+
+function checksum(buffer) {
+    let sum = 0;
+    for (let i = 0; i < buffer.length; i += 2) sum += buffer.readUInt16BE(i);
+    sum = (sum >> 16) + (sum & 0xFFFF);
+    sum += (sum >> 16);
+    return (~sum & 0xFFFF);
+}
+
+function getLocation(ip) {
+    return new Promise((resolve) => {
+        http.get(`http://ip-api.com/json/${ip}?fields=status,country,regionName,city`, (res) => {
+            let data = '';
+            res.on('data', d => data += d);
+            res.on('end', () => {
+                try {
+                    const j = JSON.parse(data);
+                    if (j.status === 'success') {
+                        const parts = [j.country, j.regionName, j.city].filter(p => p && p.trim() !== "");
+                        resolve(parts.join(', '));
+                    } else {
+                        resolve("No Data (Probably Local IP)");
+                    }
+                } catch (e) { resolve(""); }
+            });
+        }).on('error', () => resolve(""));
     });
 }
 
