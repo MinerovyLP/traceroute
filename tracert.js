@@ -23,7 +23,17 @@ function checksum(buffer) {
 
 function getLoc(ip) {
     return new Promise((resolve) => {
-        if (ip.startsWith('192.168.') || ip.startsWith('10.') || ip.startsWith('172.') || ip === '127.0.0.1') {
+        const parts = ip.split('.').map(Number);
+        
+        const isLocal = 
+            (parts[0] === 10) ||                                 // Private Class A
+            (parts[0] === 192 && parts[1] === 168) ||            // Private Class C
+            (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || // Private Class B
+            (parts[0] === 127) ||                                // Loopback (127.0.0.0/8)
+            (parts[0] === 169 && parts[1] === 254) ||            // Link-local (169.254.0.0/16)
+            (parts[0] === 100 && (parts[1] >= 64 && parts[1] <= 127)); // CGNAT (100.64.0.0/10)
+        
+        if (isLocal) {
             return resolve("Local Network");
         }
         
@@ -51,8 +61,19 @@ async function trace() {
         const lookup = await dns.lookup(DESTINATION);
         targetIp = lookup.address;
     } catch (e) {
-        console.error("Could not resolve host.");
-        process.exit(1);
+        try {
+            console.log(`Standard resolution failed. Checking for Minecraft SRV records...`);
+            const srvRecords = await dns.resolveSrv(`_minecraft._tcp.${DESTINATION}`);
+        
+            if (srvRecords && srvRecords.length > 0) {
+                const lookupSrv = await dns.lookup(srvRecords[0].name);
+                targetIp = lookupSrv.address;
+                console.log(`\x1b[32mSRV Found:\x1b[0m Redirecting to ${srvRecords[0].name} (${targetIp})`);
+            } else throw new Error();
+        } catch (e) {
+            console.error("Could not resolve host.");
+            process.exit(1);
+        }
     }
 
     console.log(`Traceroute to ${DESTINATION} (${targetIp})...\n`);
